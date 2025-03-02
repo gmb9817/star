@@ -52,7 +52,7 @@ def tokenize(code):
             tokens.append(Token("SEMICOLON", ';'))
             i += 1
             continue
-        # 두 글자 연산자 처리를 위한 조건 추가
+        # 두 글자 연산자 처리
         if c in ['>', '<', '=', '!']:
             if i+1 < len(code) and code[i+1]=='=':
                 tokens.append(Token("SYMBOL", c+'='))
@@ -228,10 +228,6 @@ class Parser:
             if_block.append(stmt)
         elif_clauses = []
         while self.current_token().type=="IDENT" and self.current_token().value=="elif":
-            print("DEBUG: Entering elif parse. current_token =", self.current_token())
-            for offset in range(0,5):
-                dbg_tk = self.peek_token(offset)
-                print("DEBUG: offset=", offset, "->", dbg_tk)
             self.advance()
             if self.current_token().type!="SYMBOL" or self.current_token().value!='(':
                 raise Exception("elif 구문 오류: '(' 필요")
@@ -353,7 +349,6 @@ class Parser:
             expr = ("assign", expr, rhs)
         return expr
 
-    # 비교 연산자를 처리하는 새로운 함수 추가
     def parse_comparison(self):
         expr = self.parse_additive()
         while self.current_token().type=="SYMBOL" and self.current_token().value in ['>', '<', '>=', '<=', '==', '!=']:
@@ -564,90 +559,93 @@ def exec_stmt(stmt):
 
 def eval_expr(expr):
     global environment
-    etype=expr[0]
+    etype = expr[0]
     if etype=="literal":
-        _,tktype,tkval=expr
+        _, tktype, tkval = expr
         return tkval
     elif etype=="ident":
-        _,name=expr
+        _, name = expr
         if name in environment:
             return environment[name]
         else:
             raise Exception(f"정의되지 않은 식별자: {name}")
     elif etype=="assign":
-        _,lhs,rhs=expr
-        if lhs[0]!="ident":
+        _, lhs, rhs = expr
+        if lhs[0] != "ident":
             raise Exception("할당의 왼쪽은 식별자여야 합니다")
-        var_name=lhs[1]
-        val=eval_expr(rhs)
-        environment[var_name]=val
+        var_name = lhs[1]
+        val = eval_expr(rhs)
+        environment[var_name] = val
         return val
     elif etype=="binary":
-        _,op,left,right=expr
-        lval=eval_expr(left)
-        rval=eval_expr(right)
-        if op=='+':
-            return lval+rval
-        elif op=='-':
-            return lval-rval
-        elif op=='*':
-            return lval*rval
-        elif op=='/':
-            return lval/rval
-        elif op=='>':
+        _, op, left, right = expr
+        lval = eval_expr(left)
+        rval = eval_expr(right)
+        if op == '+':
+            return lval + rval
+        elif op == '-':
+            return lval - rval
+        elif op == '*':
+            return lval * rval
+        elif op == '/':
+            # 두 피연산자가 모두 정수면 소숫점 내림을 적용하여 정수 나눗셈 수행
+            if isinstance(lval, int) and isinstance(rval, int):
+                return lval // rval
+            else:
+                return lval / rval
+        elif op == '>':
             return lval > rval
-        elif op=='<':
+        elif op == '<':
             return lval < rval
-        elif op=='>=':
+        elif op == '>=':
             return lval >= rval
-        elif op=='<=':
+        elif op == '<=':
             return lval <= rval
-        elif op=='==':
+        elif op == '==':
             return lval == rval
-        elif op=='!=':
+        elif op == '!=':
             return lval != rval
         else:
             raise Exception(f"미지원 연산자: {op}")
     elif etype=="func_call":
-        _,fexpr,argsexpr=expr
-        if fexpr[0]!="ident":
+        _, fexpr, argsexpr = expr
+        if fexpr[0] != "ident":
             raise Exception("함수 호출 오류: 함수 이름은 식별자여야 합니다")
-        fname=fexpr[1]
-        if fname=="output":
-            values=[eval_expr(a) for a in argsexpr]
+        fname = fexpr[1]
+        if fname == "output":
+            values = [eval_expr(a) for a in argsexpr]
             print(" ".join(str(v) for v in values))
             return None
-        if fname=="input":
-            # or do input
+        if fname == "input":
             return None
         if fname not in user_functions:
             raise Exception(f"정의되지 않은 함수: {fname}")
-        _,params,body,defenv=user_functions[fname]
-        if len(params)!=len(argsexpr):
+        _, params, body, defenv = user_functions[fname]
+        if len(params) != len(argsexpr):
             raise Exception("함수 호출 오류: 매개변수 수 불일치")
-        localenv=defenv.copy()
-        for (ptype,pname),arg in zip(params,argsexpr):
-            av=eval_expr(arg)
-            if ptype=="num":
-                av=int(av)
-            elif ptype=="fl":
-                av=float(av)
-            elif ptype=="str":
-                av=str(av)
-            elif ptype=="bool":
-                av=bool(av)
-            localenv[pname]=av
-        backup=environment.copy()
+        localenv = defenv.copy()
+        for (ptype, pname), arg in zip(params, argsexpr):
+            av = eval_expr(arg)
+            if ptype == "num":
+                av = int(av)
+            elif ptype == "fl":
+                av = float(av)
+            elif ptype == "str":
+                av = str(av)
+            elif ptype == "bool":
+                av = bool(av)
+            localenv[pname] = av
+        backup = environment.copy()
         environment.update(localenv)
-        ret=None
+        ret = None
         for st2 in body:
-            ret=exec_stmt(st2)
-        environment=backup
+            ret = exec_stmt(st2)
+        environment = backup
         return ret
     elif etype=="member_access":
-        _,objexpr,memb=expr
-        o=eval_expr(objexpr)
-        if isinstance(o,dict):
+        _, objexpr, memb = expr
+        o = eval_expr(objexpr)
+        if isinstance(o, dict):
             if memb in o:
                 return o[memb]
             else:
@@ -655,11 +653,11 @@ def eval_expr(expr):
         else:
             raise Exception("멤버 접근 오류: 객체가 레코드가 아닙니다.")
     elif etype=="member_call":
-        _,objexpr,memb,argsexpr=expr
-        o=eval_expr(objexpr)
-        argvals=[eval_expr(a) for a in argsexpr]
-        if isinstance(o,str):
-            if memb=="size":
+        _, objexpr, memb, argsexpr = expr
+        o = eval_expr(objexpr)
+        argvals = [eval_expr(a) for a in argsexpr]
+        if isinstance(o, str):
+            if memb == "size":
                 if argvals:
                     raise Exception("size()는 인자를 받지 않음")
                 return len(o)
@@ -667,22 +665,22 @@ def eval_expr(expr):
                 raise Exception(f"정의되지 않은 문자열 메서드: {memb}")
         raise Exception("멤버 호출 오류: 객체가 지원되지 않음")
     elif etype=="li":
-        _,elems=expr
+        _, elems = expr
         return [eval_expr(e) for e in elems]
     elif etype=="record":
-        _,elems=expr
+        _, elems = expr
         return [eval_expr(e) for e in elems]
     else:
         raise Exception("알 수 없는 표현식 유형", expr)
 
 if __name__=="__main__":
-    code=r"""
-
-"""
-    tokens=tokenize(code)
+    code = r"""
+    
+    """
+    tokens = tokenize(code)
     print(tokens)
-    parser=Parser(tokens)
-    stmts=parser.parse_program()
+    parser = Parser(tokens)
+    stmts = parser.parse_program()
     interpret(stmts)
     print("Done.")
     print("환경 =", environment)
