@@ -1,7 +1,7 @@
-# star
-프로그래밍 언어 star을 만듭니다.
+# starscript
+프로그래밍 언어 starscript를 만듭니다.
 
-# star의 문법
+# starscript의 문법
 
 변수를 선언하는 방법입니다.
 
