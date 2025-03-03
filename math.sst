@@ -1,41 +1,159 @@
-num pi = 3.141592653589793;
-num e = 2.718281828459045;
-
-func abs(num x):
-    if (x < 0):
-        x = -x;
+func abs(num n):
+    if (n < 0):
+        return -n;
+    else:
+        return n;
     end;
-    output(x);
-end;
-
-func sqrt(num x):
-    if (x < 0):
-        error("음수에 대해 sqrt는 정의되지 않음");
-    end;
-    num guess = x / 2;
-    while ( (guess*guess - x) > 0.000001 or (guess*guess - x) < -0.000001 ):
-        guess = (guess + x/guess) / 2;
-    end;
-    output(guess);
 end;
 
 func pow(num base, num exp):
+    if (exp == 0):
+        return 1;
+    end;
     if (exp < 0):
-        error("음수 지수는 지원하지 않습니다.");
+        return 1 / pow(base, -exp);
+    end;
+    num half = pow(base, exp / 2);
+    if (exp % 2 == 0):
+        return half * half;
+    else:
+        return half * half * base;
+    end;
+end;
+
+func gcd(num a, num b):
+    while (b != 0):
+        num temp = a % b;
+        a = b;
+        b = temp;
+    end;
+    return a;
+end;
+
+func lcm(num a, num b):
+    return (a * b) / gcd(a, b);
+end;
+
+func factorial(num n):
+    if (n <= 1):
+        return 1;
+    else:
+        return n * factorial(n - 1);
+    end;
+end;
+
+func fibonacciSeries(num n):
+    li fibs = [];
+    if (n < 0):
+        error("n은 0 이상의 값이어야 합니다");
+    end;
+    fibs = fibs + [0];
+    if (n == 0):
+        return fibs;
+    end;
+    fibs = fibs + [1];
+    num i = 2;
+    while (i <= n):
+        num next = fibs[i - 1] + fibs[i - 2];
+        fibs = fibs + [next];
+        i = i + 1;
+    end;
+    return fibs;
+end;
+
+func modExp(num base, num exp, num mod):
+    num result = 1;
+    base = base % mod;
+    while (exp > 0):
+        if (exp % 2 == 1):
+            result = (result * base) % mod;
+        end;
+        exp = exp / 2;
+        base = (base * base) % mod;
+    end;
+    return result;
+end;
+
+func nCr(num n, num r):
+    return factorial(n) / (factorial(r) * factorial(n - r));
+end;
+
+func nPr(num n, num r):
+    return factorial(n) / factorial(n - r);
+end;
+
+func fisPrime(num n):
+    if (n < 2):
+        return false;
+    end;
+    if (n == 2 or n == 3):
+        return true;
+    end;
+    if (n % 2 == 0):
+        return false;
     end;
 
-    num result = 1;
+    num s = 0;
+    num d = n - 1;
+    while (d % 2 == 0):
+        d = d / 2;
+        s = s + 1;
+    end;
 
-    while (exp > 0):
-        num half = exp / 2; 
-        if ((half * 2) == exp):
-            base = base * base;
-            exp = exp / 2;
+    li bases = [2, 3, 5, 7, 11];
+    num i = 0;
+    while (i < bases.size()):
+        num a = bases[i];
+        if (a > n - 2):
+            break;
+        end;
+        num x = modExp(a, d, n);
+        if (x == 1 or x == n - 1):
+            i = i + 1;
+            continue;
+        end;
+        num r = 1;
+        bool passed = false;
+        while (r < s):
+            x = (x * x) % n;
+            if (x == n - 1):
+                passed = true;
+                break;
+            end;
+            r = r + 1;
+        end;
+        if (not passed):
+            return false;
+        end;
+        i = i + 1;
+    end;
+
+    return true;
+end;
+
+func primeFactors(num n):
+    li factors = [];
+    num i = 2;
+    while (n > 1):
+        if (n % i == 0):
+            factors = factors + [i];
+            n = n / i;
         else:
-            result = result * base;
-            exp = exp - 1;
+            i = i + 1;
         end;
     end;
+    return factors;
+end;
 
-    output(result);
+func sqrt(num n):
+    if (n < 0):
+        error("sqrt 함수: 음수 입력");
+    end;
+    num x = n;
+    num y = (x + n / x) / 2;
+    while (abs(x - y) > 0.0001):
+        x = y;
+        y = (x + n / x) / 2;
+    end;
+    return y;
 end;
