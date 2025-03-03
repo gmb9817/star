@@ -1,37 +1,72 @@
 import sys, threading, time
 
-# 전역 환경(변수), 사용자 정의 타입, 사용자 정의 함수 테이블
 environment = {}
 user_types = {}
 user_functions = {}
+
+class ReturnException(Exception):
+    def __init__(self, value):
+        super().__init__("ReturnException")
+        self.value = value
 
 class Token:
     def __init__(self, ttype, value):
         self.type = ttype
         self.value = value
     def __repr__(self):
-        return f"Token({self.type}, {self.value})"
+        return "Token(" + str(self.type) + ", " + str(self.value) + ")"
+
+class BreakException(Exception):
+    pass
+
+class ContinueException(Exception):
+    pass
+
 
 def tokenize(code):
     tokens = []
     i = 0
     while i < len(code):
         c = code[i]
+
+        # 다중 행 주석 처리: /* ... */
+        if c == '/' and i + 1 < len(code) and code[i + 1] == '*':
+            i += 2
+            while i < len(code) - 1:
+                if code[i] == '*' and code[i + 1] == '/':
+                    i += 2
+                    break
+                i += 1
+            continue
+
+        if c == '/' and i + 1 < len(code) and code[i + 1] == '/':
+            i += 2
+            while i < len(code) and code[i] != '\n':
+                i += 1
+            continue
+
+        if c == '#':
+            while i < len(code) and code[i] != '\n':
+                i += 1
+            continue
+
         if c.isspace():
             i += 1
             continue
+
         if c.isalpha():
             start = i
-            while i < len(code) and (code[i].isalnum() or code[i]=='_'):
+            while i < len(code) and (code[i].isalnum() or code[i] == '_'):
                 i += 1
             word = code[start:i]
             tokens.append(Token("IDENT", word))
             continue
+
         if c.isdigit():
             start = i
             dot_count = 0
-            while i < len(code) and (code[i].isdigit() or code[i]=='.'):
-                if code[i]=='.':
+            while i < len(code) and (code[i].isdigit() or code[i] == '.'):
+                if code[i] == '.':
                     dot_count += 1
                 i += 1
             num_str = code[start:i]
@@ -40,30 +75,32 @@ def tokenize(code):
             else:
                 tokens.append(Token("NUMBER_NUM", int(num_str)))
             continue
-        if c=='"':
+
+        if c == '"':
             i += 1
             start = i
-            while i < len(code) and code[i]!='"':
+            while i < len(code) and code[i] != '"':
                 i += 1
             string_val = code[start:i]
             i += 1
             tokens.append(Token("STRING", string_val))
             continue
-        if c==';':
+
+        if c == ';':
             tokens.append(Token("SEMICOLON", ';'))
             i += 1
             continue
-        # 두 글자 연산자 처리 (>=, <=, ==, != 등)
+
         if c in ['>', '<', '=', '!']:
-            if i+1 < len(code) and code[i+1]=='=':
-                tokens.append(Token("SYMBOL", c+'='))
+            if i + 1 < len(code) and code[i + 1] == '=':
+                tokens.append(Token("SYMBOL", c + '='))
                 i += 2
                 continue
             else:
                 tokens.append(Token("SYMBOL", c))
                 i += 1
                 continue
-        # 그 외 모든 기호는 SYMBOL 처리
+
         tokens.append(Token("SYMBOL", c))
         i += 1
     return tokens
@@ -72,21 +109,17 @@ class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.pos = 0
-
     def current_token(self):
         if self.pos < len(self.tokens):
             return self.tokens[self.pos]
         return Token("EOF", None)
-
     def advance(self):
         self.pos += 1
-
     def peek_token(self, offset=1):
         idx = self.pos + offset
         if idx < len(self.tokens):
             return self.tokens[idx]
         return Token("EOF", None)
-
     def parse_program(self):
         statements = []
         while self.current_token().type != "EOF":
@@ -96,773 +129,824 @@ class Parser:
         return statements
 
     def parse_statement(self):
-        tk = self.current_token()
-
-        # use {모듈}
-        if tk.type=="IDENT" and tk.value=="use":
+        t = self.current_token()
+        if t.type == "IDENT" and t.value == "use":
             return self.parse_use_stmt()
-
-        # newtype
-        if tk.type=="IDENT" and tk.value=="newtype":
+        if t.type == "IDENT" and t.value == "newtype":
             return self.parse_newtype_stmt()
-
-        # func
-        if tk.type=="IDENT" and tk.value=="func":
+        if t.type == "IDENT" and t.value == "func":
             return self.parse_func_decl()
-
-        # always
-        if tk.type=="IDENT" and tk.value=="always":
+        if t.type == "IDENT" and t.value == "always":
             return self.parse_always_stmt()
-
-        # if
-        if tk.type=="IDENT" and tk.value=="if":
+        if t.type == "IDENT" and t.value == "if":
             return self.parse_if_stmt()
-
-        # while
-        if tk.type=="IDENT" and tk.value=="while":
+        if t.type == "IDENT" and t.value == "while":
             return self.parse_while_stmt()
-
-        # 변수 선언
-        if tk.type=="IDENT" and (tk.value in ["num","fl","str","bool","li"] or tk.value in user_types):
+        if t.type == "IDENT" and t.value == "return":
+            return self.parse_return_stmt()
+        if t.type == "IDENT" and t.value == "break":
+            self.advance()
+            if self.current_token().type == "SEMICOLON":
+                self.advance()
+            return ("break_stmt",)
+        if t.type == "IDENT" and t.value == "continue":
+            self.advance()
+            if self.current_token().type == "SEMICOLON":
+                self.advance()
+            return ("continue_stmt",)
+        if t.type == "IDENT" and (t.value in ["num", "fl", "str", "bool", "li"] or t.value in user_types):
             return self.parse_var_decl()
-
-        # 그 외엔 표현식 문장
         return self.parse_expr_statement()
 
     def parse_use_stmt(self):
-        # use {foo};
-        self.advance()  # 'use'
-        if self.current_token().type!="SYMBOL" or self.current_token().value!='{':
-            raise Exception("use 구문 오류: '{' 필요")
-        self.advance()  # '{'
-        if self.current_token().type!="IDENT":
-            raise Exception("use 구문 오류: 모듈 이름 필요")
-        module_name = self.current_token().value
-        self.advance()  # 모듈 이름
-        if self.current_token().type!="SYMBOL" or self.current_token().value!='}':
-            raise Exception("use 구문 오류: '}' 필요")
-        self.advance()  # '}'
-        if self.current_token().type=="SEMICOLON":
-            self.advance()
-        return ("use", module_name)
-
-    def parse_newtype_stmt(self):
-        # newtype Point:
-        self.advance()  # 'newtype'
-        if self.current_token().type != "IDENT":
-            raise Exception("newtype 구문 오류: 타입 이름 필요")
-        type_name = self.current_token().value
         self.advance()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=':':
-            raise Exception("newtype 구문 오류: ':' 필요")
+        if self.current_token().type != "SYMBOL" or self.current_token().value != '{':
+            raise Exception("use 구문 오류: '{' 필요")
+        self.advance()
+        if self.current_token().type != "IDENT":
+            raise Exception("use 구문 오류: 모듈 이름 필요")
+        modname = self.current_token().value
+        self.advance()
+        if self.current_token().type != "SYMBOL" or self.current_token().value != '}':
+            raise Exception("use 구문 오류: '}' 필요")
+        self.advance()
+        if self.current_token().type == "SEMICOLON":
+            self.advance()
+        return ("use", modname)
+    def parse_newtype_stmt(self):
+        self.advance()
+        if self.current_token().type != "IDENT":
+            raise Exception("newtype 오류: 타입 이름 필요")
+        tname = self.current_token().value
+        self.advance()
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ':':
+            raise Exception("newtype 오류: ':' 필요")
         self.advance()
         fields = []
         while True:
             tk = self.current_token()
-            if tk.type=="IDENT" and tk.value=="end":
-                if self.peek_token(1).type=="SEMICOLON":
-                    self.advance()  # 'end'
-                    self.advance()  # ';'
+            if tk.type == "IDENT" and tk.value == "end":
+                if self.peek_token(1).type == "SEMICOLON":
+                    self.advance()
+                    self.advance()
                     break
                 else:
-                    raise Exception("newtype 구문 오류: 'end;' 필요")
-            field_type_token = self.current_token()
-            if field_type_token.type!="IDENT":
+                    raise Exception("newtype 오류: 'end;' 필요")
+            ftok = self.current_token()
+            if ftok.type != "IDENT":
                 raise Exception("newtype 필드 오류: 타입 이름 필요")
-            field_type = field_type_token.value
+            ftype = ftok.value
             self.advance()
-            if self.current_token().type!="IDENT":
+            ftok2 = self.current_token()
+            if ftok2.type != "IDENT":
                 raise Exception("newtype 필드 오류: 필드 이름 필요")
-            field_name = self.current_token().value
+            fname = ftok2.value
             self.advance()
-            if self.current_token().type!="SEMICOLON":
+            if self.current_token().type != "SEMICOLON":
                 raise Exception("newtype 필드 오류: ';' 필요")
             self.advance()
-            fields.append((field_type, field_name))
-        user_types[type_name] = {"fields": fields}
-        return ("newtype", type_name, fields)
-
+            fields.append((ftype, fname))
+        user_types[tname] = {"fields": fields}
+        return ("newtype", tname, fields)
     def parse_func_decl(self):
-        # func foo(...):
-        self.advance()  # 'func'
-        if self.current_token().type!="IDENT":
-            raise Exception("함수 선언 오류: 함수 이름 필요")
-        func_name = self.current_token().value
         self.advance()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!='(':
+        if self.current_token().type != "IDENT":
+            raise Exception("함수 선언 오류: 함수 이름 필요")
+        fname = self.current_token().value
+        self.advance()
+        if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
             raise Exception("함수 선언 오류: '(' 필요")
         self.advance()
-        parameters = []
-        if not (self.current_token().type=="SYMBOL" and self.current_token().value==')'):
+        params = []
+        if not (self.current_token().type == "SYMBOL" and self.current_token().value == ')'):
             while True:
-                if self.current_token().type!="IDENT":
+                ptypeTok = self.current_token()
+                if ptypeTok.type != "IDENT":
                     raise Exception("함수 선언 오류: 매개변수 타입 필요")
-                param_type = self.current_token().value
+                ptype = ptypeTok.value
                 self.advance()
-                if self.current_token().type!="IDENT":
+                pnameTok = self.current_token()
+                if pnameTok.type != "IDENT":
                     raise Exception("함수 선언 오류: 매개변수 이름 필요")
-                param_name = self.current_token().value
+                pname = pnameTok.value
                 self.advance()
-                parameters.append((param_type, param_name))
-                if self.current_token().type=="SYMBOL" and self.current_token().value==',':
+                params.append((ptype, pname))
+                if self.current_token().type == "SYMBOL" and self.current_token().value == ',':
                     self.advance()
                 else:
                     break
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
             raise Exception("함수 선언 오류: ')' 필요")
         self.advance()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=':':
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ':':
             raise Exception("함수 선언 오류: ':' 필요")
         self.advance()
-        body_statements = []
+        body = []
         while True:
-            if self.current_token().type=="IDENT" and self.current_token().value=="end":
-                if self.peek_token(1).type=="SEMICOLON":
+            t2 = self.current_token()
+            if t2.type == "IDENT" and t2.value == "end":
+                if self.peek_token(1).type == "SEMICOLON":
                     self.advance()
                     self.advance()
                     break
                 else:
                     raise Exception("함수 선언 오류: 'end;' 필요")
-            stmt = self.parse_statement()
-            body_statements.append(stmt)
-        return ("func_decl", func_name, parameters, body_statements)
-
+            if t2.type == "EOF":
+                raise Exception("함수 선언 오류: EOF")
+            s2 = self.parse_statement()
+            body.append(s2)
+        return ("func_decl", fname, params, body)
     def parse_always_stmt(self):
-        # always (시간):
-        self.advance()  # 'always'
-        if self.current_token().type!="SYMBOL" or self.current_token().value!='(':
-            raise Exception("always 구문 오류: '(' 필요")
+        self.advance()
+        if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
+            raise Exception("always 오류: '(' 필요")
         self.advance()
         interval_expr = self.parse_expression()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
-            raise Exception("always 구문 오류: ')' 필요")
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
+            raise Exception("always 오류: ')' 필요")
         self.advance()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=':':
-            raise Exception("always 구문 오류: ':' 필요")
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ':':
+            raise Exception("always 오류: ':' 필요")
         self.advance()
-        block_stmts = []
+        bstmts = []
         while True:
-            tk = self.current_token()
-            if tk.type=="IDENT" and tk.value=="end":
-                if self.peek_token(1).type=="SEMICOLON":
+            t3 = self.current_token()
+            if t3.type == "IDENT" and t3.value == "end":
+                if self.peek_token(1).type == "SEMICOLON":
                     self.advance()
                     self.advance()
                     break
                 else:
-                    raise Exception("always 구문 오류: 'end;' 필요")
-            if tk.type=="EOF":
-                raise Exception("always 구문 오류: 'end;' 없이 EOF")
-            stmt = self.parse_statement()
-            block_stmts.append(stmt)
-        return ("always_block", interval_expr, block_stmts)
-
+                    raise Exception("always 오류: 'end;' 필요")
+            if t3.type == "EOF":
+                raise Exception("always 오류: EOF")
+            st3 = self.parse_statement()
+            bstmts.append(st3)
+        return ("always_block", interval_expr, bstmts)
     def parse_if_stmt(self):
-        # if (조건):
-        self.advance()  # 'if'
-        if self.current_token().type!="SYMBOL" or self.current_token().value!='(':
-            raise Exception("if 구문 오류: '(' 필요")
         self.advance()
-        if_condition = self.parse_expression()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
-            raise Exception("if 구문 오류: ')' 필요")
+        if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
+            raise Exception("if 오류: '(' 필요")
         self.advance()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=':':
-            raise Exception("if 구문 오류: ':' 필요")
+        ifcond = self.parse_expression()
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
+            raise Exception("if 오류: ')' 필요")
         self.advance()
-        if_block = []
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ':':
+            raise Exception("if 오류: ':' 필요")
+        self.advance()
+        ifblock = []
         while True:
-            tk = self.current_token()
-            if tk.type=="IDENT" and tk.value in ["elif","else","end"]:
+            t4 = self.current_token()
+            if t4.type == "IDENT" and t4.value in ["elif","else","end"]:
                 break
-            if tk.type=="EOF":
-                raise Exception("if 구문 오류: 'end;' 없이 EOF")
-            stmt = self.parse_statement()
-            if_block.append(stmt)
-        elif_clauses = []
-        while self.current_token().type=="IDENT" and self.current_token().value=="elif":
+            if t4.type == "EOF":
+                raise Exception("if 오류: EOF")
+            sb = self.parse_statement()
+            ifblock.append(sb)
+        elifs = []
+        while self.current_token().type == "IDENT" and self.current_token().value == "elif":
             self.advance()
-            if self.current_token().type!="SYMBOL" or self.current_token().value!='(':
-                raise Exception("elif 구문 오류: '(' 필요")
+            if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
+                raise Exception("elif 오류: '(' 필요")
             self.advance()
-            elif_condition = self.parse_expression()
-            if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
-                raise Exception("elif 구문 오류: ')' 필요")
+            ec = self.parse_expression()
+            if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
+                raise Exception("elif 오류: ')' 필요")
             self.advance()
-            if self.current_token().type!="SYMBOL" or self.current_token().value!=':':
-                raise Exception("elif 구문 오류: ':' 필요")
+            if self.current_token().type != "SYMBOL" or self.current_token().value != ':':
+                raise Exception("elif 오류: ':' 필요")
             self.advance()
-            elif_block = []
+            eb = []
             while True:
-                tk2 = self.current_token()
-                if tk2.type=="IDENT" and tk2.value in ["elif","else","end"]:
+                t5 = self.current_token()
+                if t5.type == "IDENT" and t5.value in ["elif","else","end"]:
                     break
-                if tk2.type=="EOF":
-                    raise Exception("elif 구문 오류: 'end;' 없이 EOF")
-                stmt2 = self.parse_statement()
-                elif_block.append(stmt2)
-            elif_clauses.append((elif_condition, elif_block))
-        else_block = None
-        if self.current_token().type=="IDENT" and self.current_token().value=="else":
+                if t5.type == "EOF":
+                    raise Exception("elif 오류: EOF")
+                s5 = self.parse_statement()
+                eb.append(s5)
+            elifs.append((ec, eb))
+        elseb = None
+        if self.current_token().type == "IDENT" and self.current_token().value == "else":
             self.advance()
-            if self.current_token().type!="SYMBOL" or self.current_token().value!=':':
-                raise Exception("else 구문 오류: ':' 필요")
+            if self.current_token().type != "SYMBOL" or self.current_token().value != ':':
+                raise Exception("else 오류: ':' 필요")
             self.advance()
-            else_block = []
+            elseb = []
             while True:
-                tk3 = self.current_token()
-                if tk3.type=="IDENT" and tk3.value=="end":
+                t6 = self.current_token()
+                if t6.type == "IDENT" and t6.value == "end":
                     break
-                if tk3.type=="EOF":
-                    raise Exception("else 구문 오류: 'end;' 없이 EOF")
-                stmt3 = self.parse_statement()
-                else_block.append(stmt3)
-        if self.current_token().type=="IDENT" and self.current_token().value=="end":
-            if self.peek_token(1).type=="SEMICOLON":
+                if t6.type == "EOF":
+                    raise Exception("else 오류: EOF")
+                s6 = self.parse_statement()
+                elseb.append(s6)
+        if self.current_token().type == "IDENT" and self.current_token().value == "end":
+            if self.peek_token(1).type == "SEMICOLON":
                 self.advance()
                 self.advance()
             else:
-                raise Exception("if 구문 오류: 'end;' 필요")
+                raise Exception("if 오류: 'end;' 필요")
         else:
-            raise Exception("if 구문 오류: 'end;' 필요")
-        return ("if_stmt", if_condition, if_block, elif_clauses, else_block)
-
+            raise Exception("if 오류: 'end;' 필요")
+        return ("if_stmt", ifcond, ifblock, elifs, elseb)
     def parse_while_stmt(self):
-        # while (조건):
-        self.advance()  # 'while'
-        if self.current_token().type!="SYMBOL" or self.current_token().value!='(':
-            raise Exception("while 구문 오류: '(' 필요")
         self.advance()
-        condition_expr = self.parse_expression()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
-            raise Exception("while 구문 오류: ')' 필요")
+        if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
+            raise Exception("while 오류: '(' 필요")
         self.advance()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!=':':
-            raise Exception("while 구문 오류: ':' 필요")
+        cexpr = self.parse_expression()
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
+            raise Exception("while 오류: ')' 필요")
         self.advance()
-        block_stmts = []
+        if self.current_token().type != "SYMBOL" or self.current_token().value != ':':
+            raise Exception("while 오류: ':' 필요")
+        self.advance()
+        wstmts = []
         while True:
-            tk = self.current_token()
-            if tk.type=="IDENT" and tk.value=="end":
-                if self.peek_token(1).type=="SEMICOLON":
+            tw = self.current_token()
+            if tw.type == "IDENT" and tw.value == "end":
+                if self.peek_token(1).type == "SEMICOLON":
                     self.advance()
                     self.advance()
                     break
                 else:
-                    raise Exception("while 구문 오류: 'end;' 필요")
-            if tk.type=="EOF":
-                raise Exception("while 구문 오류: 'end;' 없이 EOF")
-            stmt = self.parse_statement()
-            block_stmts.append(stmt)
-        return ("while_stmt", condition_expr, block_stmts)
-
+                    raise Exception("while 오류: 'end;' 필요")
+            if tw.type == "EOF":
+                raise Exception("while 오류: EOF")
+            sw = self.parse_statement()
+            wstmts.append(sw)
+        return ("while_stmt", cexpr, wstmts)
+    def parse_return_stmt(self):
+        self.advance()
+        rexpr = self.parse_expression()
+        if self.current_token().type != "SEMICOLON":
+            raise Exception("return 오류: 세미콜론 ';' 필요")
+        self.advance()
+        return ("return_stmt", rexpr)
     def parse_var_decl(self):
-        # num a = 5;
-        var_type = self.current_token().value
+        vtype = self.current_token().value
         self.advance()
-        if self.current_token().type!="IDENT":
+        if self.current_token().type != "IDENT":
             raise Exception("변수 선언 오류: 변수 이름 필요")
-        var_name = self.current_token().value
+        vname = self.current_token().value
         self.advance()
-        if self.current_token().type!="SYMBOL" or self.current_token().value!='=':
+        if self.current_token().type != "SYMBOL" or self.current_token().value != '=':
             raise Exception("변수 선언 오류: '=' 필요")
         self.advance()
-        init_expr = self.parse_expression()
-        if self.current_token().type=="SEMICOLON":
+        init = self.parse_expression()
+        if self.current_token().type == "SEMICOLON":
             self.advance()
         else:
             raise Exception("변수 선언 오류: 세미콜론 ';' 필요")
-        return ("var_decl", var_type, var_name, init_expr)
-
+        return ("var_decl", vtype, vname, init)
     def parse_expr_statement(self):
-        expr = self.parse_expression()
-        if self.current_token().type=="SEMICOLON":
+        e = self.parse_expression()
+        if self.current_token().type == "SEMICOLON":
             self.advance()
         else:
             raise Exception("세미콜론 ';' 필요 in expr_statement")
-        return ("expr_stmt", expr)
-
-    #----------------------
-    # Expression Grammar
-    #----------------------
-    #
-    # expression -> assignment
-    #
-    # assignment -> unary ( '=' assignment )?
-    #
-    # unary -> ( '+' | '-' ) unary
-    #         | comparison
-    #
-    # comparison -> additive ( ( '>' | '<' | '>=' | '<=' | '==' | '!=' ) additive )*
-    #
-    # additive -> multiplicative ( ( '+' | '-' ) multiplicative )*
-    #
-    # multiplicative -> postfix ( ( '*' | '/' ) postfix )*
-    #
-    # postfix -> primary ( ( '(' args? ')' ) | '.'ident '('args? ')' | '.'ident )*
-    #
-    # primary -> NUMBER | STRING | IDENT | true | false | '[' ... ] | '{' ... } | '(' expression ')'
-
+        return ("expr_stmt", e)
     def parse_expression(self):
         return self.parse_assignment()
-
     def parse_assignment(self):
-        expr = self.parse_unary()
-        # a = b 꼴이 나오는지 확인
-        if self.current_token().type=="SYMBOL" and self.current_token().value=='=':
+        expr = self.parse_logical_or()
+        if self.current_token().type == "SYMBOL" and self.current_token().value == '=':
             self.advance()
             rhs = self.parse_assignment()
             expr = ("assign", expr, rhs)
         return expr
-
-    def parse_unary(self):
-        tk = self.current_token()
-        # 단항 +, - 처리
-        if tk.type=="SYMBOL" and tk.value in ['+','-']:
-            op = tk.value
+    def parse_logical_or(self):
+        expr = self.parse_logical_and()
+        while self.current_token().type == "IDENT" and self.current_token().value == "or":
             self.advance()
-            right_expr = self.parse_unary()
-            return ("unary", op, right_expr)
-        else:
-            return self.parse_comparison()
-
+            right = self.parse_logical_and()
+            expr = ("binary", "or", expr, right)
+        return expr
+    def parse_logical_and(self):
+        expr = self.parse_comparison()
+        while self.current_token().type == "IDENT" and self.current_token().value == "and":
+            self.advance()
+            right = self.parse_comparison()
+            expr = ("binary", "and", expr, right)
+        return expr
     def parse_comparison(self):
         expr = self.parse_additive()
-        while self.current_token().type=="SYMBOL" and self.current_token().value in ['>', '<', '>=', '<=', '==', '!=']:
+        while self.current_token().type == "SYMBOL" and self.current_token().value in ['>', '<', '>=', '<=', '==', '!=']:
             op = self.current_token().value
             self.advance()
-            right = self.parse_additive()
-            expr = ("binary", op, expr, right)
+            r = self.parse_additive()
+            expr = ("binary", op, expr, r)
         return expr
-
     def parse_additive(self):
         expr = self.parse_multiplicative()
-        while self.current_token().type=="SYMBOL" and self.current_token().value in ['+','-']:
+        while self.current_token().type == "SYMBOL" and self.current_token().value in ['+','-']:
             op = self.current_token().value
             self.advance()
-            right = self.parse_multiplicative()
-            expr = ("binary", op, expr, right)
+            r = self.parse_multiplicative()
+            expr = ("binary", op, expr, r)
         return expr
 
     def parse_multiplicative(self):
-        expr = self.parse_postfix()
-        while self.current_token().type=="SYMBOL" and self.current_token().value in ['*','/']:
+        expr = self.parse_unary()  # parse_postfix() 대신 parse_unary() 호출
+        while self.current_token().type == "SYMBOL" and self.current_token().value in ['*', '/', '%']:
             op = self.current_token().value
             self.advance()
-            right = self.parse_postfix()
-            expr = ("binary", op, expr, right)
+            r = self.parse_unary()  # 동일하게 parse_unary() 사용
+            expr = ("binary", op, expr, r)
         return expr
+
+    def parse_unary(self):
+        if (self.current_token().type == "SYMBOL" and self.current_token().value in ['-', '+']) or \
+                (self.current_token().type == "IDENT" and self.current_token().value == "not"):
+            op = self.current_token().value
+            self.advance()
+            operand = self.parse_unary()  # 연속된 단항 연산자 지원
+            return ("unary", op, operand)
+        else:
+            return self.parse_postfix()
 
     def parse_postfix(self):
         expr = self.parse_primary()
         while True:
-            tk = self.current_token()
-            # 함수 호출: 식별자(...) 형태
-            if tk.type=="SYMBOL" and tk.value=='(':
+            t0 = self.current_token()
+            if t0.type == "SYMBOL" and t0.value == '(':
                 self.advance()
                 args = []
-                if not (self.current_token().type=="SYMBOL" and self.current_token().value==')'):
+                if not (self.current_token().type == "SYMBOL" and self.current_token().value == ')'):
                     while True:
                         arg = self.parse_expression()
                         args.append(arg)
-                        if self.current_token().type=="SYMBOL" and self.current_token().value==',':
+                        if self.current_token().type == "SYMBOL" and self.current_token().value == ',':
                             self.advance()
                         else:
                             break
-                if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
+                if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
                     raise Exception("함수 호출 오류: ')' 필요")
                 self.advance()
                 expr = ("func_call", expr, args)
-
-            # 멤버 접근 혹은 멤버 함수 호출: expr.ident or expr.ident(...)
-            elif tk.type=="SYMBOL" and tk.value=='.':
+            elif t0.type == "SYMBOL" and t0.value == '.':
                 self.advance()
-                if self.current_token().type!="IDENT":
+                if self.current_token().type != "IDENT":
                     raise Exception("멤버 접근 오류: 식별자 필요")
-                member_name = self.current_token().value
+                memb = self.current_token().value
                 self.advance()
-                tk2 = self.current_token()
-                if tk2.type=="SYMBOL" and tk2.value=='(':
+                t1 = self.current_token()
+                if t1.type == "SYMBOL" and t1.value == '(':
                     self.advance()
-                    args = []
-                    if not (self.current_token().type=="SYMBOL" and self.current_token().value==')'):
+                    margs = []
+                    if not (self.current_token().type == "SYMBOL" and self.current_token().value == ')'):
                         while True:
-                            arg = self.parse_expression()
-                            args.append(arg)
-                            if self.current_token().type=="SYMBOL" and self.current_token().value==',':
+                            aa = self.parse_expression()
+                            margs.append(aa)
+                            if self.current_token().type == "SYMBOL" and self.current_token().value == ',':
                                 self.advance()
                             else:
                                 break
-                    if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
+                    if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
                         raise Exception("멤버 호출 오류: ')' 필요")
                     self.advance()
-                    expr = ("member_call", expr, member_name, args)
+                    expr = ("member_call", expr, memb, margs)
                 else:
-                    expr = ("member_access", expr, member_name)
+                    expr = ("member_access", expr, memb)
+            elif t0.type == "SYMBOL" and t0.value == '[':
+                self.advance()
+                idx_expr = self.parse_expression()
+                if self.current_token().type != "SYMBOL" or self.current_token().value != ']':
+                    raise Exception("인덱스 접근 오류: ']' 필요")
+                self.advance()
+                expr = ("index", expr, idx_expr)
             else:
                 break
         return expr
-
     def parse_primary(self):
         tk = self.current_token()
-        # bool 리터럴
-        if tk.type=="IDENT" and tk.value in ["true","false"]:
+        if tk.type == "IDENT" and tk.value in ["true","false"]:
             self.advance()
-            return ("literal", "BOOL", True if tk.value=="true" else False)
-
-        # 리스트 리터럴
-        if tk.type=="SYMBOL" and tk.value=='[':
+            return ("literal","BOOL", True if tk.value=="true" else False)
+        if tk.type == "SYMBOL" and tk.value == '[':
             self.advance()
-            elements = []
-            if self.current_token().type=="SYMBOL" and self.current_token().value==']':
+            arr = []
+            if self.current_token().type == "SYMBOL" and self.current_token().value == ']':
                 self.advance()
-                return ("li", elements)
+                return ("li", arr)
             while True:
-                elem = self.parse_expression()
-                elements.append(elem)
-                if self.current_token().type=="SYMBOL" and self.current_token().value==',':
+                e2 = self.parse_expression()
+                arr.append(e2)
+                if self.current_token().type == "SYMBOL" and self.current_token().value == ',':
                     self.advance()
-                elif self.current_token().type=="SYMBOL" and self.current_token().value==']':
+                elif self.current_token().type == "SYMBOL" and self.current_token().value == ']':
                     self.advance()
                     break
                 else:
                     raise Exception("배열 리터럴 오류: ',' 또는 ']' 필요")
-            return ("li", elements)
-
-        # 레코드 리터럴
-        if tk.type=="SYMBOL" and tk.value=='{':
+            return ("li", arr)
+        if tk.type == "SYMBOL" and tk.value == '{':
             self.advance()
-            elements = []
-            if self.current_token().type=="SYMBOL" and self.current_token().value=='}':
+            rec = []
+            if self.current_token().type == "SYMBOL" and self.current_token().value == '}':
                 self.advance()
-                return ("record", elements)
+                return ("record", rec)
             while True:
-                elem = self.parse_expression()
-                elements.append(elem)
-                if self.current_token().type=="SYMBOL" and self.current_token().value==',':
+                e3 = self.parse_expression()
+                rec.append(e3)
+                if self.current_token().type == "SYMBOL" and self.current_token().value == ',':
                     self.advance()
-                elif self.current_token().type=="SYMBOL" and self.current_token().value=='}':
+                elif self.current_token().type == "SYMBOL" and self.current_token().value == '}':
                     self.advance()
                     break
                 else:
                     raise Exception("레코드 리터럴 오류: ',' 또는 '}' 필요")
-            return ("record", elements)
-
-        # 숫자/문자열 리터럴
+            return ("record", rec)
         if tk.type in ["NUMBER_NUM","NUMBER_FL","STRING"]:
             self.advance()
             return ("literal", tk.type, tk.value)
-
-        # 식별자
-        if tk.type=="IDENT":
+        if tk.type == "IDENT":
             self.advance()
             return ("ident", tk.value)
-
-        # 괄호식
-        if tk.type=="SYMBOL" and tk.value=='(':
+        if tk.type == "SYMBOL" and tk.value == '(':
             self.advance()
-            expr = self.parse_expression()
-            if self.current_token().type!="SYMBOL" or self.current_token().value!=')':
+            e4 = self.parse_expression()
+            if self.current_token().type != "SYMBOL" or self.current_token().value != ')':
                 raise Exception("괄호 오류: ')' 필요")
             self.advance()
-            return expr
-
-        raise Exception(("표현식 파싱 오류: 예상치 못한 토큰", tk))
+            return e4
+        raise Exception(("표현식 파싱 오류", tk))
 
 def interpret(statements):
-    for stmt in statements:
-        exec_stmt(stmt)
+    for st in statements:
+        exec_stmt(st)
 
 def exec_stmt(stmt):
     global environment
     stype = stmt[0]
-
-    if stype=="newtype":
-        # 사용자 정의 타입은 이미 user_types에 저장했으므로 처리 끝
+    if stype == "newtype":
         return
-
-    elif stype=="func_decl":
-        # 함수 이름, 매개변수, 본문을 user_functions에 등록
-        _, func_name, params, body = stmt
-        user_functions[func_name] = ("function", params, body, environment.copy())
+    elif stype == "func_decl":
+        _, fn, ps, bd = stmt
+        func_obj = ("function", ps, bd, environment.copy())
+        user_functions[fn] = func_obj
+        environment[fn] = func_obj  # 현재 환경에도 함수 저장
         return
-
-    elif stype=="var_decl":
-        # 변수 선언 (ex) num a = 5;
-        _, var_type, var_name, init_expr = stmt
-        value = eval_expr(init_expr)
-
-        # 타입에 맞춰 캐스팅
-        if var_type=="num":
-            value = int(value)
-        elif var_type=="fl":
-            value = float(value)
-        elif var_type=="str":
-            value = str(value)
-        elif var_type=="bool":
-            value = bool(value)
-        elif var_type=="li":
-            # 리스트 타입은 특별 처리 없음
+    elif stype == "var_decl":
+        _, vt, vn, init = stmt
+        val = eval_expr(init)
+        if vt == "num":
+            val = int(val)
+        elif vt == "fl":
+            val = float(val)
+        elif vt == "str":
+            val = str(val)
+        elif vt == "bool":
+            val = bool(val)
+        elif vt == "li":
             pass
-        elif var_type in user_types:
-            # 레코드 타입
-            fields = user_types[var_type]["fields"]
-            if not isinstance(value, list):
-                raise Exception("레코드 초기값은 { } 로 작성되어야 합니다.")
-            if len(value)!=len(fields):
-                raise Exception(f"{var_type} 타입 필드 수와 초기값 개수가 일치하지 않습니다.")
-            rec={}
-            for ((ftype,fname),fval) in zip(fields,value):
-                rec[fname]=fval
-            value=rec
+        elif vt in user_types:
+            fs = user_types[vt]["fields"]
+            if not isinstance(val, list):
+                raise Exception("레코드 초기값은 { } 로 작성")
+            if len(val) != len(fs):
+                raise Exception(vt + " 타입 필드 수 불일치")
+            rec = {}
+            for ((ft, fnm), fv) in zip(fs, val):
+                rec[fnm] = fv
+            val = rec
         else:
-            raise Exception(f"알 수 없는 타입: {var_type}")
-
-        environment[var_name]=value
+            raise Exception("알 수 없는 타입: " + vt)
+        environment[vn] = val
         return
-
-    elif stype=="use":
-        # use {foo};
-        _, module_name = stmt
-        filename = module_name + ".st"
+    elif stype == "use":
+        _, mname = stmt
+        fname = mname + ".sst"
         try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                module_code = f.read()
+            with open(fname, "r", encoding="utf-8") as f:
+                mc = f.read()
         except Exception as e:
-            raise Exception(f"파일 {filename} 읽기 실패: {e}")
-
-        module_tokens = tokenize(module_code)
-        module_parser = Parser(module_tokens)
-        module_stmts = module_parser.parse_program()
-        # 모듈 코드 해석 (user_types, user_functions 등이 갱신될 수 있음)
-        interpret(module_stmts)
+            raise Exception("파일 " + fname + " 읽기 실패: " + str(e))
+        tks = tokenize(mc)
+        p2 = Parser(tks)
+        sms = p2.parse_program()
+        backup = environment.copy()
+        environment.clear()
+        interpret(sms)
+        mod_defs = environment.copy()
+        environment.clear()
+        environment.update(backup)
+        environment[mname] = mod_defs
         return
-
-    elif stype=="expr_stmt":
-        # 표현식을 평가만 함
+    elif stype == "expr_stmt":
         eval_expr(stmt[1])
         return
-
-    elif stype=="if_stmt":
-        _, ifcond, ifblock, elifs, elseblock = stmt
-        if eval_expr(ifcond):
-            for s in ifblock:
-                exec_stmt(s)
+    elif stype == "return_stmt":
+        _, exr = stmt
+        rv = eval_expr(exr)
+        raise ReturnException(rv)
+    elif stype == "if_stmt":
+        _, ifc, ifb, elifs, elseb = stmt
+        cval = eval_expr(ifc)
+        if cval:
+            for s1 in ifb:
+                exec_stmt(s1)
         else:
-            done=False
-            for cnd,blk in elifs:
-                if eval_expr(cnd):
-                    for s2 in blk:
+            done = False
+            for ccond, cblk in elifs:
+                cc = eval_expr(ccond)
+                if cc:
+                    for s2 in cblk:
                         exec_stmt(s2)
-                    done=True
+                    done = True
                     break
-            if not done and elseblock is not None:
-                for s3 in elseblock:
+            if not done and elseb is not None:
+                for s3 in elseb:
                     exec_stmt(s3)
         return
-
-    elif stype=="while_stmt":
-        _, condexpr, blockstmts = stmt
-        while eval_expr(condexpr):
-            for s in blockstmts:
-                exec_stmt(s)
+    elif stype == "while_stmt":
+        _, cexpr, wblk = stmt
+        while True:
+            condv = eval_expr(cexpr)
+            if not condv:
+                break
+            try:
+                for s4 in wblk:
+                    exec_stmt(s4)
+            except BreakException:
+                break
+            except ContinueException:
+                # continue: 현재 반복문의 나머지 코드를 건너뛰고 조건 평가로 돌아감
+                pass
         return
-
-    elif stype=="always_block":
-        _, intervalexpr, block = stmt
-        ival = eval_expr(intervalexpr)
-        def loopfunc():
+    elif stype == "always_block":
+        _, intex, b1 = stmt
+        ival = eval_expr(intex)
+        def loopf():
             while True:
-                for st in block:
-                    exec_stmt(st)
+                for s5 in b1:
+                    exec_stmt(s5)
                 time.sleep(ival)
-        t=threading.Thread(target=loopfunc)
-        t.daemon=True
+        t = threading.Thread(target=loopf)
+        t.daemon = True
         t.start()
         return
-
+    elif stype == "break_stmt":
+        raise BreakException()
+    elif stype == "continue_stmt":
+        raise ContinueException()
     else:
-        print("알 수 없는 문장 유형:", stmt)
+        pass
 
 def eval_expr(expr):
     global environment
     etype = expr[0]
-
-    if etype=="literal":
-        # (literal, 타입, 값)
-        _, tktype, tkval = expr
-        return tkval
-
-    elif etype=="ident":
-        # (ident, 이름)
-        _, name = expr
-        if name in environment:
-            return environment[name]
+    if etype == "literal":
+        _, tkt, val = expr
+        return val
+    elif etype == "ident":
+        _, nm = expr
+        if nm in environment:
+            return environment[nm]
         else:
-            raise Exception(f"정의되지 않은 식별자: {name}")
-
-    elif etype=="assign":
-        # (assign, (식), rhs)
+            raise Exception("정의되지 않은 식별자: " + nm)
+    elif etype == "assign":
         _, lhs, rhs = expr
         if lhs[0] != "ident":
-            raise Exception("할당의 왼쪽은 식별자여야 합니다")
-        var_name = lhs[1]
-        val = eval_expr(rhs)
-        environment[var_name] = val
-        return val
-
-    elif etype=="unary":
-        # (unary, op, expr)
-        _, op, inner_expr = expr
-        val = eval_expr(inner_expr)
+            raise Exception("할당 왼쪽은 식별자여야 함")
+        vn = lhs[1]
+        v2 = eval_expr(rhs)
+        environment[vn] = v2
+        return v2
+    elif etype == "unary":
+        _, op, inr = expr
+        rv = eval_expr(inr)
         if op == '-':
-            return -val
+            return -rv
         elif op == '+':
-            return +val
+            return +rv
         else:
-            raise Exception(f"알 수 없는 단항 연산자: {op}")
-
-    elif etype=="binary":
-        # (binary, 연산자, 왼쪽, 오른쪽)
-        _, op, left, right = expr
-        lval = eval_expr(left)
-        rval = eval_expr(right)
-
+            raise Exception("알 수 없는 단항연산자: " + op)
+    elif etype == "binary":
+        _, op, le, re = expr
+        lv = eval_expr(le)
+        rv = eval_expr(re)
         if op == '+':
-            return lval + rval
+            return lv + rv
         elif op == '-':
-            return lval - rval
+            return lv - rv
         elif op == '*':
-            return lval * rval
+            return lv * rv
         elif op == '/':
-            # 두 피연산자가 모두 int 면 내림 나눗셈
-            if isinstance(lval, int) and isinstance(rval, int):
-                return lval // rval
+            if isinstance(lv, int) and isinstance(rv, int):
+                return lv // rv
             else:
-                return lval / rval
+                return lv / rv
+        elif op == '%':
+            return lv % rv
         elif op == '>':
-            return lval > rval
+            return lv > rv
         elif op == '<':
-            return lval < rval
+            return lv < rv
         elif op == '>=':
-            return lval >= rval
+            return lv >= rv
         elif op == '<=':
-            return lval <= rval
+            return lv <= rv
         elif op == '==':
-            return lval == rval
+            return lv == rv
         elif op == '!=':
-            return lval != rval
+            return lv != rv
+        elif op == "or":
+            return lv or rv
+        elif op == "and":
+            return lv and rv
         else:
-            raise Exception(f"미지원 연산자: {op}")
-
-    elif etype=="func_call":
-        # (func_call, (ident, 함수이름), [인자표현식...])
-        _, fexpr, argsexpr = expr
-        if fexpr[0] != "ident":
-            raise Exception("함수 호출 오류: 함수 이름은 식별자여야 합니다")
-        fname = fexpr[1]
-
-        # 빌트인 함수들
-        if fname == "output":
-            values = [eval_expr(a) for a in argsexpr]
-            print(" ".join(str(v) for v in values))
+            raise Exception("미지원 연산자: " + op)
+    elif etype == "func_call":
+        _, fx, argl = expr
+        if fx[0] != "ident":
+            raise Exception("함수 호출 오류: 이름은 식별자")
+        fn = fx[1]
+        if fn == "output":
+            vals = [eval_expr(a) for a in argl]
+            print(" ".join(str(v) for v in vals))
             return None
-
-        if fname == "input":
-            # 필요시 실제 입력을 받을 수도 있음
+        if fn == "input":
+            ac = len(argl)
+            if ac < 1:
+                raise Exception("input에는 변수 인자 필요")
+            var_names = []
+            for texpr in argl:
+                if texpr[0] != "ident":
+                    raise Exception("input 인자는 식별자")
+                var_names.append(texpr[1])
+            needed = ac
+            gathered = []
+            while len(gathered) < needed:
+                ln = sys.stdin.readline()
+                if not ln:
+                    raise Exception("입력 중단")
+                parts = ln.strip().split()
+                gathered.extend(parts)
+            for i in range(ac):
+                varn = var_names[i]
+                rawv = gathered[i]
+                if varn in environment:
+                    oldv = environment[varn]
+                    if isinstance(oldv, int):
+                        newv = int(rawv)
+                    elif isinstance(oldv, float):
+                        newv = float(rawv)
+                    elif isinstance(oldv, bool):
+                        newv = (rawv.lower() in ["true", "1"])
+                    else:
+                        newv = rawv
+                else:
+                    newv = rawv
+                environment[varn] = newv
             return None
-
-        if fname == "error":
-            values = [eval_expr(a) for a in argsexpr]
-            message = " ".join(str(v) for v in values)
-            raise Exception("Error: " + message)
-
-        # 사용자 정의 함수 호출
-        if fname not in user_functions:
-            raise Exception(f"정의되지 않은 함수: {fname}")
-        _, params, body, defenv = user_functions[fname]
-
-        # 인자 개수 체크
-        if len(params) != len(argsexpr):
+        if fn == "error":
+            vall = [eval_expr(a) for a in argl]
+            msg = " ".join(str(v) for v in vall)
+            raise Exception("Error: " + msg)
+        if fn not in user_functions:
+            raise Exception("함수 정의 안됨: " + fn)
+        finfo = user_functions[fn]
+        fkind, fparams, fbody, fdefenv = finfo
+        if fkind != "function":
+            raise Exception("함수 아님: " + fn)
+        if len(fparams) != len(argl):
             raise Exception("함수 호출 오류: 매개변수 수 불일치")
-
-        # 함수 호출 시점의 지역 환경 만들기
-        localenv = defenv.copy()
-        for (ptype, pname), arg in zip(params, argsexpr):
-            av = eval_expr(arg)
-            if ptype == "num":
+        localenv = fdefenv.copy()
+        for (pt, pn), ax in zip(fparams, argl):
+            av = eval_expr(ax)
+            if pt == "num":
                 av = int(av)
-            elif ptype == "fl":
+            elif pt == "fl":
                 av = float(av)
-            elif ptype == "str":
+            elif pt == "str":
                 av = str(av)
-            elif ptype == "bool":
+            elif pt == "bool":
                 av = bool(av)
-            localenv[pname] = av
-
-        # 현재 environment를 백업, 로컬 환경 병합
-        backup = environment.copy()
+            localenv[pn] = av
+        bkup = environment.copy()
         environment.update(localenv)
-
-        # 함수 본문 실행
-        ret = None
-        for st2 in body:
-            ret = exec_stmt(st2)
-
-        # environment 복원
-        environment = backup
-
-        return ret
-
-    elif etype=="member_access":
-        # (member_access, 객체_expr, 멤버이름)
-        _, objexpr, memb = expr
-        o = eval_expr(objexpr)
-        if isinstance(o, dict):
-            if memb in o:
-                return o[memb]
+        retv = None
+        try:
+            for stx in fbody:
+                exec_stmt(stx)
+        except ReturnException as rtx:
+            retv = rtx.value
+        environment = bkup
+        return retv
+    elif etype == "member_access":
+        _, ox, mmb = expr
+        obv = eval_expr(ox)
+        if isinstance(obv, dict):
+            if mmb in obv:
+                return obv[mmb]
             else:
-                raise Exception(f"레코드에 필드 {memb}이 없습니다.")
+                raise Exception("레코드에 필드 " + mmb + " 없음")
         else:
-            raise Exception("멤버 접근 오류: 객체가 레코드가 아닙니다.")
+            raise Exception("멤버 접근: 객체가 레코드가 아님")
 
-    elif etype=="member_call":
-        # (member_call, 객체_expr, 멤버이름, [인자표현식...])
-        _, objexpr, memb, argsexpr = expr
-        o = eval_expr(objexpr)
-        argvals = [eval_expr(a) for a in argsexpr]
 
-        if isinstance(o, str):
-            # 문자열 관련 메서드 예시
-            if memb == "size":
-                if argvals:
-                    raise Exception("size()는 인자를 받지 않음")
-                return len(o)
+    elif etype == "member_call":
+        _, ox2, m2, ax2 = expr
+        obj2 = eval_expr(ox2)
+        a2 = [eval_expr(i) for i in ax2]
+        if isinstance(obj2, dict):
+            if m2 in obj2:
+                func = obj2[m2]
+                if isinstance(func, tuple) and func[0] == "function":
+                    if len(func[1]) != len(a2):
+                        raise Exception("함수 호출 오류: 매개변수 수 불일치")
+                    localenv = func[3].copy()  # fdefenv 복사
+                    for (ptype, pn), av in zip(func[1], a2):
+                        if ptype == "num":
+                            av = int(av)
+                        elif ptype == "fl":
+                            av = float(av)
+                        elif ptype == "str":
+                            av = str(av)
+                        elif ptype == "bool":
+                            av = bool(av)
+                        localenv[pn] = av
+                    backup = environment.copy()
+                    environment.update(localenv)
+                    retv = None
+                    try:
+                        for st in func[2]:
+                            exec_stmt(st)
+                    except ReturnException as rtx:
+                        retv = rtx.value
+                    environment = backup
+                    return retv
+                else:
+                    raise Exception("멤버 호출: " + m2 + "은 함수가 아님")
             else:
-                raise Exception(f"정의되지 않은 문자열 메서드: {memb}")
+                raise Exception("모듈에 " + m2 + " 함수가 없음")
+        if isinstance(obj2, tuple) and obj2[0] == "function":
+            fkind, fparams, fbody, fdefenv = obj2
+            if len(fparams) != len(a2):
+                raise Exception("함수 호출 오류: 매개변수 수 불일치")
+            localenv = fdefenv.copy()
+            for (ptype, pn), av in zip(fparams, a2):
+                if ptype == "num":
+                    av = int(av)
+                elif ptype == "fl":
+                    av = float(av)
+                elif ptype == "str":
+                    av = str(av)
+                elif ptype == "bool":
+                    av = bool(av)
+                localenv[pn] = av
+            backup = environment.copy()
+            environment.update(localenv)
+            retv = None
+            try:
+                for st in fbody:
+                    exec_stmt(st)
+            except ReturnException as rtx:
+                retv = rtx.value
+            environment.clear()
+            environment.update(backup)
+            return retv
+        if isinstance(obj2, str):
+            if m2 == "size":
+                if len(a2) > 0:
+                    raise Exception("size() 인자 불필요")
+                return len(obj2)
+            else:
+                raise Exception("문자열에 정의되지 않은 메서드: " + m2)
+        if isinstance(obj2, list):
+            if m2 == "size":
+                if len(a2) > 0:
+                    raise Exception("size() 인자 불필요")
+                return len(obj2)
+            raise Exception("리스트에 정의되지 않은 메서드: " + m2)
+        raise Exception("멤버 호출: 객체가 지원되지 않음")
 
-        raise Exception("멤버 호출 오류: 객체가 지원되지 않음")
-
-    elif etype=="li":
-        # (li, [원소표현식들...])
-        _, elems = expr
-        return [eval_expr(e) for e in elems]
-
-    elif etype=="record":
-        # (record, [원소표현식들...])
-        _, elems = expr
-        return [eval_expr(e) for e in elems]
-
+    elif etype == "index":
+        _, base_expr, index_expr = expr
+        base_val = eval_expr(base_expr)
+        index_val = eval_expr(index_expr)
+        try:
+            return base_val[index_val]
+        except Exception as e:
+            raise Exception("인덱스 접근 오류: " + str(e))
+    elif etype == "li":
+        _, elms = expr
+        return [eval_expr(e) for e in elms]
+    elif etype == "record":
+        _, els2 = expr
+        return [eval_expr(e) for e in els2]
     else:
-        raise Exception("알 수 없는 표현식 유형", expr)
+        raise Exception("알 수 없는 표현식 유형: " + str(etype))
 
-# 테스트 코드: num x = -5; -> error() 호출
-code = r"""
+if __name__ == "__main__":
+    code = r"""
 
 """
-tokens = tokenize(code)
-print(tokens)
-parser = Parser(tokens)
-stmts = parser.parse_program()
-interpret(stmts)
-print("Done.")
-print("환경 =", environment)
+    tok = tokenize(code)
+    par = Parser(tok)
+    stm = par.parse_program()
+    interpret(stm)
+    print("Done.")
