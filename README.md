@@ -63,7 +63,7 @@ newtype 키워드를 사용하여 사용자 정의 타입을 만들 수 있습�
 
 ```
 newtype Person:
-    string name;
+    str name;
     num age;
     end;
 ```
@@ -181,7 +181,7 @@ end;
 
 // 사용자 정의 타입 및 레코드 사용
 newtype Person:
-    string name;
+    str name;
     num age;
 end;
 
