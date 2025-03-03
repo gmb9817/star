@@ -135,7 +135,7 @@ error(x):
 예제 코드
 아래 예제는 Starscript의 다양한 기능을 종합적으로 보여줍니다.
 
-`
+```
 // 변수 선언
 num counter = 0;
 string greeting = "Hello, Starscript!";
@@ -164,4 +164,4 @@ output("이름: ", person.name, ", 나이: ", person.age);
 always (1.0) :
     output("1초마다 실행되는 코드");
 end;
-`
+```
