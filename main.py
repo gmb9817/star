@@ -942,11 +942,12 @@ def eval_expr(expr):
         raise Exception("알 수 없는 표현식 유형: " + str(etype))
 
 if __name__ == "__main__":
-    code = r"""
-
-"""
+    f=open('main.sst','r')
+    c1=f.readlines()
+    code = ''
+    for i in c1:
+        code+=i
     tok = tokenize(code)
     par = Parser(tok)
     stm = par.parse_program()
     interpret(stm)
-    print("Done.")
