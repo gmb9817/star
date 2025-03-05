@@ -22,7 +22,6 @@ class BreakException(Exception):
 class ContinueException(Exception):
     pass
 
-
 def tokenize(code):
     tokens = []
     i = 0
@@ -206,7 +205,6 @@ class Parser:
                 raise Exception("newtype 필드 오류: ';' 필요")
             self.advance()
             fields.append((ftype, fname))
-        user_types[tname] = {"fields": fields}
         return ("newtype", tname, fields)
     def parse_func_decl(self):
         self.advance()
@@ -447,26 +445,23 @@ class Parser:
             r = self.parse_multiplicative()
             expr = ("binary", op, expr, r)
         return expr
-
     def parse_multiplicative(self):
-        expr = self.parse_unary()  # parse_postfix() 대신 parse_unary() 호출
+        expr = self.parse_unary()
         while self.current_token().type == "SYMBOL" and self.current_token().value in ['*', '/', '%']:
             op = self.current_token().value
             self.advance()
-            r = self.parse_unary()  # 동일하게 parse_unary() 사용
+            r = self.parse_unary()
             expr = ("binary", op, expr, r)
         return expr
-
     def parse_unary(self):
         if (self.current_token().type == "SYMBOL" and self.current_token().value in ['-', '+']) or \
-                (self.current_token().type == "IDENT" and self.current_token().value == "not"):
+           (self.current_token().type == "IDENT" and self.current_token().value == "not"):
             op = self.current_token().value
             self.advance()
-            operand = self.parse_unary()  # 연속된 단항 연산자 지원
+            operand = self.parse_unary()
             return ("unary", op, operand)
         else:
             return self.parse_postfix()
-
     def parse_postfix(self):
         expr = self.parse_primary()
         while True:
@@ -582,6 +577,10 @@ def exec_stmt(stmt):
     global environment
     stype = stmt[0]
     if stype == "newtype":
+        # 수정: newtype을 user_types와 environment에 등록
+        _, tname, fields = stmt
+        user_types[tname] = {"fields": fields}
+        environment[tname] = {"newtype": tname, "fields": fields}
         return
     elif stype == "func_decl":
         _, fn, ps, bd = stmt
@@ -673,7 +672,6 @@ def exec_stmt(stmt):
             except BreakException:
                 break
             except ContinueException:
-                # continue: 현재 반복문의 나머지 코드를 건너뛰고 조건 평가로 돌아감
                 pass
         return
     elif stype == "always_block":
@@ -846,8 +844,6 @@ def eval_expr(expr):
                 raise Exception("레코드에 필드 " + mmb + " 없음")
         else:
             raise Exception("멤버 접근: 객체가 레코드가 아님")
-
-
     elif etype == "member_call":
         _, ox2, m2, ax2 = expr
         obj2 = eval_expr(ox2)
@@ -923,7 +919,6 @@ def eval_expr(expr):
                 return len(obj2)
             raise Exception("리스트에 정의되지 않은 메서드: " + m2)
         raise Exception("멤버 호출: 객체가 지원되지 않음")
-
     elif etype == "index":
         _, base_expr, index_expr = expr
         base_val = eval_expr(base_expr)
@@ -942,12 +937,9 @@ def eval_expr(expr):
         raise Exception("알 수 없는 표현식 유형: " + str(etype))
 
 if __name__ == "__main__":
-    f=open('main.sst','r')
-    c1=f.readlines()
-    code = ''
-    for i in c1:
-        code+=i
-    tok = tokenize(code)
-    par = Parser(tok)
-    stm = par.parse_program()
-    interpret(stm)
+    with open('main.sst','r', encoding="utf-8") as f:
+        code = f.read()
+    tokens = tokenize(code)
+    parser = Parser(tokens)
+    statements = parser.parse_program()
+    interpret(statements)
