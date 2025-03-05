@@ -829,10 +829,14 @@ def eval_expr(expr):
         # 내장 함수 exec 추가: 인자로 받은 문자열 코드를 실행
         if fn == "exec":
             if len(argl) != 1:
-                raise Exception("exec 함수는 하나의 문자열 인자를 받아야 합니다.")
-            code_str = eval_expr(argl[0])
+                raise Exception("exec 함수는 하나의 code 인자를 받아야 합니다.")
+            code_val = eval_expr(argl[0])
+            # code_val가 딕셔너리이고, 'source' 필드가 있어야 code 자료형임
+            if not (isinstance(code_val, dict) and "source" in code_val):
+                raise Exception("exec 함수의 인자는 code 자료형이어야 합니다.")
+            code_str = code_val["source"]
             if not isinstance(code_str, str):
-                raise Exception("exec 함수의 인자는 문자열이어야 합니다.")
+                raise Exception("code 자료형의 source 필드는 문자열이어야 합니다.")
             tokens = tokenize(code_str)
             parser = Parser(tokens)
             statements = parser.parse_program()
