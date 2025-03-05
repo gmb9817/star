@@ -1,0 +1,8 @@
+newtype code:
+    str source;
+end;
+
+func new_code(str s) :
+    code c = { s };
+    return c;
+end;
