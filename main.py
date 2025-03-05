@@ -38,13 +38,8 @@ def tokenize(code):
                 i += 1
             continue
 
-        if c == '/' and i + 1 < len(code) and code[i + 1] == '/':
-            i += 2
-            while i < len(code) and code[i] != '\n':
-                i += 1
-            continue
-
-        if c == '#':
+        # 한 줄 주석 처리: // 또는 #
+        if (c == '/' and i + 1 < len(code) and code[i + 1] == '/') or c == '#':
             while i < len(code) and code[i] != '\n':
                 i += 1
             continue
@@ -53,18 +48,20 @@ def tokenize(code):
             i += 1
             continue
 
+        # 식별자: 알파벳으로 시작, 이후 알파벳/숫자/언더스코어
         if c.isalpha():
             start = i
-            while i < len(code) and (code[i].isalnum() or code[i] == '_'):
+            while i < len(code) and (code[i].isalnum() or code[i]=='_'):
                 i += 1
             word = code[start:i]
             tokens.append(Token("IDENT", word))
             continue
 
+        # 숫자: 정수 또는 소수
         if c.isdigit():
             start = i
             dot_count = 0
-            while i < len(code) and (code[i].isdigit() or code[i] == '.'):
+            while i < len(code) and (code[i].isdigit() or code[i]=='.'):
                 if code[i] == '.':
                     dot_count += 1
                 i += 1
@@ -75,6 +72,7 @@ def tokenize(code):
                 tokens.append(Token("NUMBER_NUM", int(num_str)))
             continue
 
+        # 문자열 (큰따옴표로 감싸진)
         if c == '"':
             i += 1
             start = i
@@ -85,13 +83,15 @@ def tokenize(code):
             tokens.append(Token("STRING", string_val))
             continue
 
+        # 세미콜론
         if c == ';':
             tokens.append(Token("SEMICOLON", ';'))
             i += 1
             continue
 
+        # 기호: >, <, =, ! 등 (두 글자 연산자 포함)
         if c in ['>', '<', '=', '!']:
-            if i + 1 < len(code) and code[i + 1] == '=':
+            if i + 1 < len(code) and code[i+1] == '=':
                 tokens.append(Token("SYMBOL", c + '='))
                 i += 2
                 continue
@@ -100,6 +100,7 @@ def tokenize(code):
                 i += 1
                 continue
 
+        # 기타 기호: (, ), {, }, :, [, ], ,, .
         tokens.append(Token("SYMBOL", c))
         i += 1
     return tokens
@@ -108,17 +109,21 @@ class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.pos = 0
+
     def current_token(self):
         if self.pos < len(self.tokens):
             return self.tokens[self.pos]
         return Token("EOF", None)
+
     def advance(self):
         self.pos += 1
+
     def peek_token(self, offset=1):
         idx = self.pos + offset
         if idx < len(self.tokens):
             return self.tokens[idx]
         return Token("EOF", None)
+
     def parse_program(self):
         statements = []
         while self.current_token().type != "EOF":
@@ -129,32 +134,31 @@ class Parser:
 
     def parse_statement(self):
         t = self.current_token()
-        if t.type == "IDENT" and t.value == "use":
-            return self.parse_use_stmt()
-        if t.type == "IDENT" and t.value == "newtype":
-            return self.parse_newtype_stmt()
-        if t.type == "IDENT" and t.value == "func":
-            return self.parse_func_decl()
-        if t.type == "IDENT" and t.value == "always":
-            return self.parse_always_stmt()
-        if t.type == "IDENT" and t.value == "if":
-            return self.parse_if_stmt()
-        if t.type == "IDENT" and t.value == "while":
-            return self.parse_while_stmt()
-        if t.type == "IDENT" and t.value == "return":
-            return self.parse_return_stmt()
-        if t.type == "IDENT" and t.value == "break":
-            self.advance()
-            if self.current_token().type == "SEMICOLON":
+        if t.type == "IDENT":
+            if t.value == "use":
+                return self.parse_use_stmt()
+            if t.value == "newtype":
+                return self.parse_newtype_stmt()
+            if t.value == "func":
+                return self.parse_func_decl()
+            if t.value == "always":
+                return self.parse_always_stmt()
+            if t.value == "if":
+                return self.parse_if_stmt()
+            if t.value == "while":
+                return self.parse_while_stmt()
+            if t.value == "return":
+                return self.parse_return_stmt()
+            if t.value in ["break", "continue"]:
                 self.advance()
-            return ("break_stmt",)
-        if t.type == "IDENT" and t.value == "continue":
-            self.advance()
-            if self.current_token().type == "SEMICOLON":
-                self.advance()
-            return ("continue_stmt",)
-        if t.type == "IDENT" and (t.value in ["num", "fl", "str", "bool", "li"] or t.value in user_types):
-            return self.parse_var_decl()
+                if self.current_token().type == "SEMICOLON":
+                    self.advance()
+                return (t.value + "_stmt",)
+            # 변수 선언: 토큰 순서가 "타입 IDENT = ..." 인 경우.
+            if (self.peek_token(1).type == "IDENT" and 
+                self.peek_token(2).type == "SYMBOL" and 
+                self.peek_token(2).value == '='):
+                return self.parse_var_decl()
         return self.parse_expr_statement()
 
     def parse_use_stmt(self):
@@ -172,6 +176,7 @@ class Parser:
         if self.current_token().type == "SEMICOLON":
             self.advance()
         return ("use", modname)
+
     def parse_newtype_stmt(self):
         self.advance()
         if self.current_token().type != "IDENT":
@@ -206,6 +211,7 @@ class Parser:
             self.advance()
             fields.append((ftype, fname))
         return ("newtype", tname, fields)
+
     def parse_func_decl(self):
         self.advance()
         if self.current_token().type != "IDENT":
@@ -254,6 +260,7 @@ class Parser:
             s2 = self.parse_statement()
             body.append(s2)
         return ("func_decl", fname, params, body)
+
     def parse_always_stmt(self):
         self.advance()
         if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
@@ -281,6 +288,7 @@ class Parser:
             st3 = self.parse_statement()
             bstmts.append(st3)
         return ("always_block", interval_expr, bstmts)
+
     def parse_if_stmt(self):
         self.advance()
         if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
@@ -296,7 +304,7 @@ class Parser:
         ifblock = []
         while True:
             t4 = self.current_token()
-            if t4.type == "IDENT" and t4.value in ["elif","else","end"]:
+            if t4.type == "IDENT" and t4.value in ["elif", "else", "end"]:
                 break
             if t4.type == "EOF":
                 raise Exception("if 오류: EOF")
@@ -318,7 +326,7 @@ class Parser:
             eb = []
             while True:
                 t5 = self.current_token()
-                if t5.type == "IDENT" and t5.value in ["elif","else","end"]:
+                if t5.type == "IDENT" and t5.value in ["elif", "else", "end"]:
                     break
                 if t5.type == "EOF":
                     raise Exception("elif 오류: EOF")
@@ -349,6 +357,7 @@ class Parser:
         else:
             raise Exception("if 오류: 'end;' 필요")
         return ("if_stmt", ifcond, ifblock, elifs, elseb)
+
     def parse_while_stmt(self):
         self.advance()
         if self.current_token().type != "SYMBOL" or self.current_token().value != '(':
@@ -376,6 +385,7 @@ class Parser:
             sw = self.parse_statement()
             wstmts.append(sw)
         return ("while_stmt", cexpr, wstmts)
+
     def parse_return_stmt(self):
         self.advance()
         rexpr = self.parse_expression()
@@ -383,7 +393,9 @@ class Parser:
             raise Exception("return 오류: 세미콜론 ';' 필요")
         self.advance()
         return ("return_stmt", rexpr)
+
     def parse_var_decl(self):
+        # 변수 선언: type IDENT = expression;
         vtype = self.current_token().value
         self.advance()
         if self.current_token().type != "IDENT":
@@ -399,6 +411,7 @@ class Parser:
         else:
             raise Exception("변수 선언 오류: 세미콜론 ';' 필요")
         return ("var_decl", vtype, vname, init)
+
     def parse_expr_statement(self):
         e = self.parse_expression()
         if self.current_token().type == "SEMICOLON":
@@ -406,8 +419,10 @@ class Parser:
         else:
             raise Exception("세미콜론 ';' 필요 in expr_statement")
         return ("expr_stmt", e)
+
     def parse_expression(self):
         return self.parse_assignment()
+
     def parse_assignment(self):
         expr = self.parse_logical_or()
         if self.current_token().type == "SYMBOL" and self.current_token().value == '=':
@@ -415,6 +430,7 @@ class Parser:
             rhs = self.parse_assignment()
             expr = ("assign", expr, rhs)
         return expr
+
     def parse_logical_or(self):
         expr = self.parse_logical_and()
         while self.current_token().type == "IDENT" and self.current_token().value == "or":
@@ -422,6 +438,7 @@ class Parser:
             right = self.parse_logical_and()
             expr = ("binary", "or", expr, right)
         return expr
+
     def parse_logical_and(self):
         expr = self.parse_comparison()
         while self.current_token().type == "IDENT" and self.current_token().value == "and":
@@ -429,6 +446,7 @@ class Parser:
             right = self.parse_comparison()
             expr = ("binary", "and", expr, right)
         return expr
+
     def parse_comparison(self):
         expr = self.parse_additive()
         while self.current_token().type == "SYMBOL" and self.current_token().value in ['>', '<', '>=', '<=', '==', '!=']:
@@ -437,6 +455,7 @@ class Parser:
             r = self.parse_additive()
             expr = ("binary", op, expr, r)
         return expr
+
     def parse_additive(self):
         expr = self.parse_multiplicative()
         while self.current_token().type == "SYMBOL" and self.current_token().value in ['+','-']:
@@ -445,6 +464,7 @@ class Parser:
             r = self.parse_multiplicative()
             expr = ("binary", op, expr, r)
         return expr
+
     def parse_multiplicative(self):
         expr = self.parse_unary()
         while self.current_token().type == "SYMBOL" and self.current_token().value in ['*', '/', '%']:
@@ -453,15 +473,17 @@ class Parser:
             r = self.parse_unary()
             expr = ("binary", op, expr, r)
         return expr
+
     def parse_unary(self):
-        if (self.current_token().type == "SYMBOL" and self.current_token().value in ['-', '+']) or \
-           (self.current_token().type == "IDENT" and self.current_token().value == "not"):
+        if ((self.current_token().type == "SYMBOL" and self.current_token().value in ['-', '+']) or 
+            (self.current_token().type == "IDENT" and self.current_token().value == "not")):
             op = self.current_token().value
             self.advance()
             operand = self.parse_unary()
             return ("unary", op, operand)
         else:
             return self.parse_postfix()
+
     def parse_postfix(self):
         expr = self.parse_primary()
         while True:
@@ -515,11 +537,12 @@ class Parser:
             else:
                 break
         return expr
+
     def parse_primary(self):
         tk = self.current_token()
-        if tk.type == "IDENT" and tk.value in ["true","false"]:
+        if tk.type == "IDENT" and tk.value in ["true", "false"]:
             self.advance()
-            return ("literal","BOOL", True if tk.value=="true" else False)
+            return ("literal", "BOOL", True if tk.value=="true" else False)
         if tk.type == "SYMBOL" and tk.value == '[':
             self.advance()
             arr = []
@@ -554,7 +577,7 @@ class Parser:
                 else:
                     raise Exception("레코드 리터럴 오류: ',' 또는 '}' 필요")
             return ("record", rec)
-        if tk.type in ["NUMBER_NUM","NUMBER_FL","STRING"]:
+        if tk.type in ["NUMBER_NUM", "NUMBER_FL", "STRING"]:
             self.advance()
             return ("literal", tk.type, tk.value)
         if tk.type == "IDENT":
@@ -577,7 +600,7 @@ def exec_stmt(stmt):
     global environment
     stype = stmt[0]
     if stype == "newtype":
-        # 수정: newtype을 user_types와 environment에 등록
+        # newtype 구문 실행 시 user_types와 environment에 등록
         _, tname, fields = stmt
         user_types[tname] = {"fields": fields}
         environment[tname] = {"newtype": tname, "fields": fields}
@@ -586,7 +609,7 @@ def exec_stmt(stmt):
         _, fn, ps, bd = stmt
         func_obj = ("function", ps, bd, environment.copy())
         user_functions[fn] = func_obj
-        environment[fn] = func_obj  # 현재 환경에도 함수 저장
+        environment[fn] = func_obj
         return
     elif stype == "var_decl":
         _, vt, vn, init = stmt
@@ -604,7 +627,7 @@ def exec_stmt(stmt):
         elif vt in user_types:
             fs = user_types[vt]["fields"]
             if not isinstance(val, list):
-                raise Exception("레코드 초기값은 { } 로 작성")
+                raise Exception("레코드 초기값은 { ... } 형태로 작성해야 합니다.")
             if len(val) != len(fs):
                 raise Exception(vt + " 타입 필드 수 불일치")
             rec = {}
@@ -672,7 +695,7 @@ def exec_stmt(stmt):
             except BreakException:
                 break
             except ContinueException:
-                pass
+                continue
         return
     elif stype == "always_block":
         _, intex, b1 = stmt
@@ -708,7 +731,7 @@ def eval_expr(expr):
     elif etype == "assign":
         _, lhs, rhs = expr
         if lhs[0] != "ident":
-            raise Exception("할당 왼쪽은 식별자여야 함")
+            raise Exception("할당 왼쪽은 식별자여야 합니다.")
         vn = lhs[1]
         v2 = eval_expr(rhs)
         environment[vn] = v2
@@ -720,6 +743,8 @@ def eval_expr(expr):
             return -rv
         elif op == '+':
             return +rv
+        elif op == "not":
+            return not rv
         else:
             raise Exception("알 수 없는 단항연산자: " + op)
     elif etype == "binary":
@@ -760,7 +785,7 @@ def eval_expr(expr):
     elif etype == "func_call":
         _, fx, argl = expr
         if fx[0] != "ident":
-            raise Exception("함수 호출 오류: 이름은 식별자")
+            raise Exception("함수 호출 오류: 이름은 식별자여야 합니다.")
         fn = fx[1]
         if fn == "output":
             vals = [eval_expr(a) for a in argl]
@@ -769,11 +794,11 @@ def eval_expr(expr):
         if fn == "input":
             ac = len(argl)
             if ac < 1:
-                raise Exception("input에는 변수 인자 필요")
+                raise Exception("input에는 적어도 하나 이상의 변수 식별자가 필요합니다.")
             var_names = []
             for texpr in argl:
                 if texpr[0] != "ident":
-                    raise Exception("input 인자는 식별자")
+                    raise Exception("input 인자는 식별자여야 합니다.")
                 var_names.append(texpr[1])
             needed = ac
             gathered = []
@@ -841,9 +866,9 @@ def eval_expr(expr):
             if mmb in obv:
                 return obv[mmb]
             else:
-                raise Exception("레코드에 필드 " + mmb + " 없음")
+                raise Exception("레코드/객체에 필드 " + mmb + " 없음")
         else:
-            raise Exception("멤버 접근: 객체가 레코드가 아님")
+            raise Exception("멤버 접근 오류: 객체가 dict(레코드)가 아님")
     elif etype == "member_call":
         _, ox2, m2, ax2 = expr
         obj2 = eval_expr(ox2)
@@ -853,8 +878,8 @@ def eval_expr(expr):
                 func = obj2[m2]
                 if isinstance(func, tuple) and func[0] == "function":
                     if len(func[1]) != len(a2):
-                        raise Exception("함수 호출 오류: 매개변수 수 불일치")
-                    localenv = func[3].copy()  # fdefenv 복사
+                        raise Exception("멤버 함수 호출 오류: 매개변수 수 불일치")
+                    localenv = func[3].copy()
                     for (ptype, pn), av in zip(func[1], a2):
                         if ptype == "num":
                             av = int(av)
@@ -876,9 +901,22 @@ def eval_expr(expr):
                     environment = backup
                     return retv
                 else:
-                    raise Exception("멤버 호출: " + m2 + "은 함수가 아님")
+                    raise Exception("멤버 호출 오류: " + m2 + "은 함수가 아님")
             else:
-                raise Exception("모듈에 " + m2 + " 함수가 없음")
+                raise Exception("모듈/레코드에 " + m2 + " 함수(멤버) 없음")
+        if isinstance(obj2, str):
+            if m2 == "size":
+                if len(a2) > 0:
+                    raise Exception("문자열 size()는 인자가 없어야 합니다.")
+                return len(obj2)
+            else:
+                raise Exception("문자열에 정의되지 않은 메서드: " + m2)
+        if isinstance(obj2, list):
+            if m2 == "size":
+                if len(a2) > 0:
+                    raise Exception("리스트 size()는 인자가 없어야 합니다.")
+                return len(obj2)
+            raise Exception("리스트에 정의되지 않은 메서드: " + m2)
         if isinstance(obj2, tuple) and obj2[0] == "function":
             fkind, fparams, fbody, fdefenv = obj2
             if len(fparams) != len(a2):
@@ -905,20 +943,7 @@ def eval_expr(expr):
             environment.clear()
             environment.update(backup)
             return retv
-        if isinstance(obj2, str):
-            if m2 == "size":
-                if len(a2) > 0:
-                    raise Exception("size() 인자 불필요")
-                return len(obj2)
-            else:
-                raise Exception("문자열에 정의되지 않은 메서드: " + m2)
-        if isinstance(obj2, list):
-            if m2 == "size":
-                if len(a2) > 0:
-                    raise Exception("size() 인자 불필요")
-                return len(obj2)
-            raise Exception("리스트에 정의되지 않은 메서드: " + m2)
-        raise Exception("멤버 호출: 객체가 지원되지 않음")
+        raise Exception("멤버 호출 오류: 해당 객체 타입에서 메서드를 지원하지 않습니다.")
     elif etype == "index":
         _, base_expr, index_expr = expr
         base_val = eval_expr(base_expr)
@@ -937,7 +962,7 @@ def eval_expr(expr):
         raise Exception("알 수 없는 표현식 유형: " + str(etype))
 
 if __name__ == "__main__":
-    with open('main.sst','r', encoding="utf-8") as f:
+    with open('main.sst', 'r', encoding='utf-8') as f:
         code = f.read()
     tokens = tokenize(code)
     parser = Parser(tokens)
