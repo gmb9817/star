@@ -27,7 +27,6 @@ def tokenize(code):
     i = 0
     while i < len(code):
         c = code[i]
-
         # 다중 행 주석 처리: /* ... */
         if c == '/' and i + 1 < len(code) and code[i + 1] == '*':
             i += 2
@@ -37,17 +36,14 @@ def tokenize(code):
                     break
                 i += 1
             continue
-
         # 한 줄 주석 처리: // 또는 #
         if (c == '/' and i + 1 < len(code) and code[i + 1] == '/') or c == '#':
             while i < len(code) and code[i] != '\n':
                 i += 1
             continue
-
         if c.isspace():
             i += 1
             continue
-
         # 식별자: 알파벳으로 시작, 이후 알파벳/숫자/언더스코어
         if c.isalpha():
             start = i
@@ -56,7 +52,6 @@ def tokenize(code):
             word = code[start:i]
             tokens.append(Token("IDENT", word))
             continue
-
         # 숫자: 정수 또는 소수
         if c.isdigit():
             start = i
@@ -71,7 +66,6 @@ def tokenize(code):
             else:
                 tokens.append(Token("NUMBER_NUM", int(num_str)))
             continue
-
         # 문자열 (큰따옴표로 감싸진)
         if c == '"':
             i += 1
@@ -82,13 +76,11 @@ def tokenize(code):
             i += 1
             tokens.append(Token("STRING", string_val))
             continue
-
         # 세미콜론
         if c == ';':
             tokens.append(Token("SEMICOLON", ';'))
             i += 1
             continue
-
         # 기호: >, <, =, ! 등 (두 글자 연산자 포함)
         if c in ['>', '<', '=', '!']:
             if i + 1 < len(code) and code[i+1] == '=':
@@ -99,7 +91,6 @@ def tokenize(code):
                 tokens.append(Token("SYMBOL", c))
                 i += 1
                 continue
-
         # 기타 기호: (, ), {, }, :, [, ], ,, .
         tokens.append(Token("SYMBOL", c))
         i += 1
@@ -154,7 +145,7 @@ class Parser:
                 if self.current_token().type == "SEMICOLON":
                     self.advance()
                 return (t.value + "_stmt",)
-            # 변수 선언: 토큰 순서가 "타입 IDENT = ..." 인 경우.
+            # 변수 선언: type IDENT = ... 형태로 판단
             if (self.peek_token(1).type == "IDENT" and 
                 self.peek_token(2).type == "SYMBOL" and 
                 self.peek_token(2).value == '='):
@@ -626,14 +617,20 @@ def exec_stmt(stmt):
             pass
         elif vt in user_types:
             fs = user_types[vt]["fields"]
-            if not isinstance(val, list):
+            # 만약 초기값이 리스트라면 record 리터럴로 판단하여 변환
+            if isinstance(val, list):
+                if len(val) != len(fs):
+                    raise Exception(vt + " 타입 필드 수 불일치")
+                rec = {}
+                for ((ft, fnm), fv) in zip(fs, val):
+                    rec[fnm] = fv
+                val = rec
+            # 만약 이미 딕셔너리라면 그대로 사용 (예: 함수 호출 결과)
+            elif isinstance(val, dict):
+                # (필요시 필드 검증 추가 가능)
+                pass
+            else:
                 raise Exception("레코드 초기값은 { ... } 형태로 작성해야 합니다.")
-            if len(val) != len(fs):
-                raise Exception(vt + " 타입 필드 수 불일치")
-            rec = {}
-            for ((ft, fnm), fv) in zip(fs, val):
-                rec[fnm] = fv
-            val = rec
         else:
             raise Exception("알 수 없는 타입: " + vt)
         environment[vn] = val
