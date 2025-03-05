@@ -617,7 +617,7 @@ def exec_stmt(stmt):
             pass
         elif vt in user_types:
             fs = user_types[vt]["fields"]
-            # 만약 초기값이 리스트라면 record 리터럴로 판단하여 변환
+            # 초기값이 리스트라면 record 리터럴로 간주하여 변환
             if isinstance(val, list):
                 if len(val) != len(fs):
                     raise Exception(vt + " 타입 필드 수 불일치")
@@ -625,9 +625,8 @@ def exec_stmt(stmt):
                 for ((ft, fnm), fv) in zip(fs, val):
                     rec[fnm] = fv
                 val = rec
-            # 만약 이미 딕셔너리라면 그대로 사용 (예: 함수 호출 결과)
+            # 이미 딕셔너리이면 그대로 사용
             elif isinstance(val, dict):
-                # (필요시 필드 검증 추가 가능)
                 pass
             else:
                 raise Exception("레코드 초기값은 { ... } 형태로 작성해야 합니다.")
@@ -784,6 +783,7 @@ def eval_expr(expr):
         if fx[0] != "ident":
             raise Exception("함수 호출 오류: 이름은 식별자여야 합니다.")
         fn = fx[1]
+        # 내장 함수 output, input, error 처리
         if fn == "output":
             vals = [eval_expr(a) for a in argl]
             print(" ".join(str(v) for v in vals))
@@ -826,6 +826,19 @@ def eval_expr(expr):
             vall = [eval_expr(a) for a in argl]
             msg = " ".join(str(v) for v in vall)
             raise Exception("Error: " + msg)
+        # 내장 함수 exec 추가: 인자로 받은 문자열 코드를 실행
+        if fn == "exec":
+            if len(argl) != 1:
+                raise Exception("exec 함수는 하나의 문자열 인자를 받아야 합니다.")
+            code_str = eval_expr(argl[0])
+            if not isinstance(code_str, str):
+                raise Exception("exec 함수의 인자는 문자열이어야 합니다.")
+            tokens = tokenize(code_str)
+            parser = Parser(tokens)
+            statements = parser.parse_program()
+            interpret(statements)
+            return None
+        # 사용자 정의 함수 호출
         if fn not in user_functions:
             raise Exception("함수 정의 안됨: " + fn)
         finfo = user_functions[fn]
@@ -959,6 +972,7 @@ def eval_expr(expr):
         raise Exception("알 수 없는 표현식 유형: " + str(etype))
 
 if __name__ == "__main__":
+    # 파일에서 읽지 않고, 내장 exec 기능을 테스트할 수 있습니다.
     with open('main.sst', 'r', encoding='utf-8') as f:
         code = f.read()
     tokens = tokenize(code)
