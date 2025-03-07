@@ -66,13 +66,16 @@ def tokenize(code):
             else:
                 tokens.append(Token("NUMBER_NUM", int(num_str)))
             continue
-        # 문자열 (큰따옴표로 감싸진)
+        # 문자열 (큰따옴표로 감싸진, 이스케이프 시퀀스 처리 추가)
         if c == '"':
             i += 1
             start = i
             while i < len(code) and code[i] != '"':
+                if code[i] == '\\' and i + 1 < len(code):  # 이스케이프 문자 처리
+                    i += 1
                 i += 1
-            string_val = code[start:i]
+            # 이스케이프 시퀀스들을 실제 문자로 변환
+            string_val = code[start:i].encode().decode("unicode_escape")
             i += 1
             tokens.append(Token("STRING", string_val))
             continue
@@ -976,7 +979,6 @@ def eval_expr(expr):
         raise Exception("알 수 없는 표현식 유형: " + str(etype))
 
 if __name__ == "__main__":
-    # 파일에서 읽지 않고, 내장 exec 기능을 테스트할 수 있습니다.
     with open('main.sst', 'r', encoding='utf-8') as f:
         code = f.read()
     tokens = tokenize(code)
