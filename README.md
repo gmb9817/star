@@ -1,6 +1,7 @@
 # starscript
 프로그래밍 언어 starscript를 만듭니다.
 
+기여자: 
 # 문법
 
 변수 선언
