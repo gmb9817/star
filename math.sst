@@ -157,3 +157,37 @@ func sqrt(num n):
     end;
     return y;
 end;
+
+num NEXT = 1234;
+func rand():
+	NEXT = NEXT * 1103515245 + 12345;
+	// NEXT >> 16
+	return (NEXT / pow(2, 16));
+end;
+
+func pollardRho(num n):
+	if (n % 2 == 0):
+		return 2;
+	end;
+	if (fisPrime(n)):
+		return n;
+	end;
+	num x = rand() % (n-2) + 2;
+	num y = x;
+	num c = rand() % 10 + 1;
+	num g = 1;
+	while (g == 1):
+		x = (x*x % n + c) % n;
+		y = (y*y % n + c) % n;
+		y = (y*y % n + c) % n;
+
+		g = gcd(abs(x-y), n);
+		if (g == n):
+			return pollardRho(n);
+		end;
+	end;
+	if (fisPrime(g)):
+		return g;
+	end;
+	return pollardRho(g);
+end;
